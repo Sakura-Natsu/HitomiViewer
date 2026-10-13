@@ -1,0 +1,173 @@
+import 'dart:async';
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter/painting.dart';
+import 'package:hitomi_api/hitomi_api.dart';
+import 'package:http/http.dart' as http_package;
+import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import 'crop.dart';
+import 'download_manager.dart';
+import 'gallery_repository.dart';
+import 'http_client.dart';
+import 'image_loader.dart';
+import 'library_store.dart';
+import 'settings.dart';
+import 'tag_labels.dart';
+import 'tag_suggester.dart';
+import 'tag_translations.dart';
+
+/// 全局服务。在 [main] 中初始化后通过 [services] 访问。
+class AppServices {
+  AppServices._({
+    required this.settings,
+    required this.http,
+    required this.hitomi,
+    required this.images,
+    required this.library,
+    required this.downloads,
+    required this.galleries,
+    required this.translations,
+    required this.tagSuggester,
+  }) : tagLabels = TagLabels(settings, translations);
+
+  static AppServices? _instance;
+
+  final AppSettings settings;
+  final ProxyHttpClient http;
+  final Hitomi hitomi;
+  final ImageLoader images;
+  final LibraryStore library;
+  final DownloadManager downloads;
+  final GalleryRepository galleries;
+
+  /// 中文标签库。
+  final TagTranslations translations;
+  final TagSuggester tagSuggester;
+
+  /// 标签显示名称（中文/英文）。
+  final TagLabels tagLabels;
+
+  /// 阅读器的白边检测结果。
+  final CropCache crops = CropCache();
+
+  static Future<AppServices> init() async {
+    await _migrateRenamedDataDirectories();
+    final prefs = await SharedPreferences.getInstance();
+    final settings = AppSettings(prefs);
+    final http = ProxyHttpClient(settings.proxy);
+    final support = await getApplicationSupportDirectory();
+    final services = await create(
+      settings: settings,
+      http: http,
+      client: http,
+      supportDirectory: support,
+      cacheDirectory: await getApplicationCacheDirectory(),
+      downloadDirectory: await _downloadDirectory(support),
+    );
+
+    PaintingBinding.instance.imageCache.maximumSizeBytes = 256 << 20;
+    await services.applyProxy();
+    // 启动后在后台清理超出上限的图片缓存。
+    Timer(const Duration(seconds: 10), () {
+      services.images.trimCache(settings.cacheLimitMb << 20).ignore();
+    });
+    // 中文标签库：首次使用时下载，之后每天检查一次更新。
+    if (settings.tagTranslation) {
+      Timer(const Duration(seconds: 3), () {
+        services.translations.updateIfStale().ignore();
+      });
+    }
+    return services;
+  }
+
+  /// 组装各项服务并设为全局实例。测试中可以传入模拟的 [client] 与临时目录。
+  @visibleForTesting
+  static Future<AppServices> create({
+    required AppSettings settings,
+    required ProxyHttpClient http,
+    required http_package.Client client,
+    required Directory supportDirectory,
+    required Directory cacheDirectory,
+    required Directory downloadDirectory,
+  }) async {
+    final hitomi = Hitomi(client: client);
+    final images = ImageLoader(
+      hitomi,
+      client,
+      Directory('${cacheDirectory.path}/images'),
+    );
+    final downloads = await DownloadManager.open(downloadDirectory, images);
+    final translations = await TagTranslations.open(
+      Directory('${supportDirectory.path}/ehtag'),
+      client,
+    );
+    final services = AppServices._(
+      settings: settings,
+      http: http,
+      hitomi: hitomi,
+      images: images,
+      library: await LibraryStore.open(supportDirectory),
+      downloads: downloads,
+      galleries: GalleryRepository(hitomi, downloads),
+      translations: translations,
+      tagSuggester: TagSuggester(
+        hitomi,
+        translations,
+        File('${cacheDirectory.path}/tag_suggest.json'),
+      ),
+    );
+    _instance = services;
+    return services;
+  }
+
+  /// 应用由 Hitomi Reader 改名为 HitomiViewer 后，Windows 上的数据目录（按产品名命名）
+  /// 随之改变。首次启动时把旧目录整个搬过来，收藏、历史、设置和图片缓存都不会丢。
+  /// Android 的数据目录按包名区分，不受影响。
+  static Future<void> _migrateRenamedDataDirectories() async {
+    if (!Platform.isWindows) return;
+    for (final directory in [
+      await getApplicationSupportDirectory(),
+      await getApplicationCacheDirectory(),
+    ]) {
+      final old = Directory(
+        '${directory.parent.path}${Platform.pathSeparator}Hitomi Reader',
+      );
+      try {
+        if (!await old.exists()) continue;
+        if (await directory.exists()) {
+          // 新目录里已经有数据（已经迁移过或新版本已经用过），保留新目录
+          if (!await directory.list().isEmpty) continue;
+          await directory.delete();
+        }
+        await old.rename(directory.path);
+        debugPrint('已迁移旧数据目录: ${old.path} → ${directory.path}');
+      } on FileSystemException catch (error) {
+        debugPrint('迁移旧数据目录失败: $error');
+      }
+    }
+  }
+
+  /// Windows 上下载到“文档/HitomiReader”，便于用户找到；其他平台放在应用目录。
+  static Future<Directory> _downloadDirectory(Directory support) async {
+    if (Platform.isWindows) {
+      final documents = await getApplicationDocumentsDirectory();
+      return Directory('${documents.path}/HitomiReader/downloads');
+    }
+    return Directory('${support.path}/downloads');
+  }
+
+  /// 根据设置重建 HTTP 客户端的代理配置。
+  Future<void> applyProxy() async {
+    final config = settings.proxy;
+    final systemProxy = config.mode == ProxyMode.system
+        ? await detectWindowsSystemProxy()
+        : null;
+    http.configure(config, systemProxy: systemProxy);
+    hitomi.imageContext().ignore();
+  }
+}
+
+AppServices get services => AppServices._instance!;

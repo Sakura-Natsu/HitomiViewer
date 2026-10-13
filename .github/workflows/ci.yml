@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: hitomi_api（协议层）
+        working-directory: hitomi_api
+        run: |
+          dart pub get
+          dart analyze
+          dart test
+
+      - name: hitomi_reader（应用）
+        working-directory: hitomi_reader
+        run: |
+          flutter pub get
+          flutter analyze
+          flutter test
