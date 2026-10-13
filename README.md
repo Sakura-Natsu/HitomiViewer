@@ -34,7 +34,7 @@ hitomi.la 的非官方第三方客户端，界面与操作习惯参照 EhViewer�
 - **Android**：`HitomiViewer-版本号.apk`（Android 7.0 及以上）。此类应用无法上架主流应用商店，需要自行侧载安装。
 - **Windows**：`HitomiViewer-版本号-windows-x64.zip`，解压后运行 `HitomiViewer.exe`（Windows 10 及以上，x64）。
 
-也可以按下文的说明从源码构建。
+安装包由 GitHub Actions 自动构建（见下文“自动构建与发布”），也可以按下文的说明从源码构建。
 
 **网络说明**：在无法直连 hitomi.la 的网络环境中，
 
@@ -149,6 +149,36 @@ flutter build windows --release
 > 应用的包名是 `io.github.sakuranatsu.hitomiviewer`。v1.0.0 使用的是临时包名 `com.example.hitomi_reader` 和调试签名，无法直接升级，请卸载后安装新版本（卸载会清除旧版本的收藏和历史）。
 
 应用图标由 `hitomi_reader/tool/make_icons.py` 从 `tool/icon_source.webp` 生成（需要 Python、Pillow 和 numpy）。
+
+### 自动构建与发布
+
+仓库配置了 GitHub Actions：
+
+- [`ci.yml`](.github/workflows/ci.yml)：每次推送到 main 或提交 PR 时检查代码并运行全部测试。
+- [`release.yml`](.github/workflows/release.yml)：推送 `v*` 标签时，同时构建 Android（正式签名）和 Windows 安装包，并发布到 Releases；也可以在 Actions 页面手动运行，只构建不发布，安装包在运行结果的 Artifacts 里。
+
+发布新版本：
+
+1. 修改 `hitomi_reader/pubspec.yaml` 的 `version`，例如 `1.0.2+3`。加号前是显示的版本号，加号后的数字每次发布都要增大。
+2. 提交并推送后打标签，标签必须与版本号一致：
+
+   ```bash
+   git tag v1.0.2
+   git push origin v1.0.2
+   ```
+
+3. 构建完成后，Release 会自动创建，更新说明根据提交记录生成。如果想自己写更新说明，可以先在 GitHub 上用这个标签建好 Release，构建完成后只会往里面上传安装包。
+
+Android 签名需要在仓库的 *Settings → Secrets and variables → Actions* 中配置：
+
+| Secret | 内容 |
+| :-- | :-- |
+| `ANDROID_KEYSTORE_BASE64` | 密钥库文件的 base64，例如 `base64 -w0 hitomiviewer-release.jks` |
+| `ANDROID_KEYSTORE_PASSWORD` | 密钥库密码 |
+| `ANDROID_KEY_ALIAS` | 密钥别名（可选，默认 `hitomiviewer`） |
+| `ANDROID_KEY_PASSWORD` | 密钥密码（可选，默认与密钥库密码相同） |
+
+没有配置签名时，发布流程会直接失败，不会发布调试签名的安装包。
 
 ## 项目结构
 
