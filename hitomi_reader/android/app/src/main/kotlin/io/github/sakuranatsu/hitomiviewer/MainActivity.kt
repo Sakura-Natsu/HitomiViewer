@@ -1,4 +1,4 @@
-package com.example.hitomi_reader
+package io.github.sakuranatsu.hitomiviewer
 
 import android.Manifest
 import android.content.ContentValues

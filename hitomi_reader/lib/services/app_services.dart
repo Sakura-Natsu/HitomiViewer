@@ -123,30 +123,44 @@ class AppServices {
     return services;
   }
 
-  /// 应用由 Hitomi Reader 改名为 HitomiViewer 后，Windows 上的数据目录（按产品名命名）
-  /// 随之改变。首次启动时把旧目录整个搬过来，收藏、历史、设置和图片缓存都不会丢。
-  /// Android 的数据目录按包名区分，不受影响。
+  /// Windows 上的数据目录按“发布者\产品名”命名（`%APPDATA%\Sakura-Natsu\HitomiViewer`）。
+  /// 早期版本的发布者是 com.example、产品名是 Hitomi Reader，首次启动新版本时把旧目录整个
+  /// 搬过来，收藏、历史、设置和图片缓存都不会丢。Android 的数据按包名区分，不受影响。
   static Future<void> _migrateRenamedDataDirectories() async {
     if (!Platform.isWindows) return;
     for (final directory in [
       await getApplicationSupportDirectory(),
       await getApplicationCacheDirectory(),
     ]) {
-      final old = Directory(
-        '${directory.parent.path}${Platform.pathSeparator}Hitomi Reader',
-      );
-      try {
+      await migrateDataDirectory(directory, [
+        for (final old in [
+          'com.example\\HitomiViewer',
+          'com.example\\Hitomi Reader',
+        ])
+          Directory('${directory.parent.parent.path}\\$old'),
+      ]);
+    }
+  }
+
+  /// 新目录为空（或不存在）时，把第一个存在的旧目录整个移动过去。
+  @visibleForTesting
+  static Future<void> migrateDataDirectory(
+    Directory directory,
+    List<Directory> candidates,
+  ) async {
+    try {
+      // 新目录里已经有数据（已经迁移过或新版本已经用过），保留新目录
+      if (await directory.exists() && !await directory.list().isEmpty) return;
+      for (final old in candidates) {
         if (!await old.exists()) continue;
-        if (await directory.exists()) {
-          // 新目录里已经有数据（已经迁移过或新版本已经用过），保留新目录
-          if (!await directory.list().isEmpty) continue;
-          await directory.delete();
-        }
+        if (await directory.exists()) await directory.delete();
+        await directory.parent.create(recursive: true);
         await old.rename(directory.path);
         debugPrint('已迁移旧数据目录: ${old.path} → ${directory.path}');
-      } on FileSystemException catch (error) {
-        debugPrint('迁移旧数据目录失败: $error');
+        return;
       }
+    } on FileSystemException catch (error) {
+      debugPrint('迁移旧数据目录失败: $error');
     }
   }
 

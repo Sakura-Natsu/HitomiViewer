@@ -1,0 +1,11 @@
+# 发布签名配置示例。复制为同目录下的 key.properties 并填写（key.properties 不会提交到版本库）。
+#
+# 生成密钥库（keytool 在 JDK 或 Android Studio 的 jbr/bin 里，会提示设置密码）：
+#   keytool -genkeypair -v -keystore hitomiviewer-release.jks -storetype PKCS12 \
+#           -alias hitomiviewer -keyalg RSA -keysize 2048 -validity 10000
+#
+# 密钥库和密码务必备份：丢失后无法再发布可以覆盖升级的版本。
+storePassword=密钥库密码
+keyPassword=密钥密码（PKCS12 密钥库与密钥库密码相同）
+keyAlias=hitomiviewer
+storeFile=D:/path/to/hitomiviewer-release.jks

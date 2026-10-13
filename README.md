@@ -130,8 +130,23 @@ flutter build apk --release --split-per-abi
 flutter build windows --release
 ```
 
-> [!NOTE]
-> Android 发布版目前使用 debug 签名。自行分发前请在 `hitomi_reader/android/app/build.gradle.kts` 中配置自己的签名；不同签名的安装包不能互相覆盖安装。
+### Android 发布签名
+
+发布版用 `hitomi_reader/android/key.properties` 中的密钥签名，这个文件和密钥库都不进版本库：
+
+1. 生成密钥库（`keytool` 在 JDK 或 Android Studio 的 `jbr/bin` 目录里，会提示设置密码）：
+
+   ```bash
+   keytool -genkeypair -v -keystore hitomiviewer-release.jks -storetype PKCS12            -alias hitomiviewer -keyalg RSA -keysize 2048 -validity 10000
+   ```
+
+2. 把 [`key.properties.example`](hitomi_reader/android/key.properties.example) 复制为 `hitomi_reader/android/key.properties`，填上密码、别名和密钥库路径。
+3. 照常执行 `flutter build apk --release`。
+
+没有 `key.properties` 时 release 包会退回调试签名（构建时会有警告），只能用于本地测试。签名不同的安装包不能互相覆盖安装，所以自己构建的版本无法覆盖安装 Releases 上的官方版本。
+
+> [!IMPORTANT]
+> 应用的包名是 `io.github.sakuranatsu.hitomiviewer`。v1.0.0 使用的是临时包名 `com.example.hitomi_reader` 和调试签名，无法直接升级，请卸载后安装新版本（卸载会清除旧版本的收藏和历史）。
 
 应用图标由 `hitomi_reader/tool/make_icons.py` 从 `tool/icon_source.webp` 生成（需要 Python、Pillow 和 numpy）。
 
